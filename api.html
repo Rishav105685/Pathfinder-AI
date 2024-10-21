@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Google Maps Integration</title>
+    <title>Google Maps Trekking Mode</title>
     <style>
         * {
             box-sizing: border-box;
@@ -30,7 +30,7 @@
             top: 20px;
             left: 20px;
             z-index: 1;
-            cursor: move; /* Make control box draggable */
+            cursor: move;
         }
         h1 {
             margin: 0 0 15px;
@@ -73,9 +73,11 @@
             border-radius: 5px;
             display: flex;
             flex-direction: column;
+            visibility: hidden;
         }
-        #routeInfo div {
-            margin: 2px 0;
+        #elevationChart {
+            width: 100%;
+            height: 200px;
         }
         .nearby {
             margin-top: 20px;
@@ -119,6 +121,7 @@
         }
     </style>
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDfTc5T0evpoUvZrFYM0DETGibUL64zDu4&libraries=places"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="controls" id="controlBox">
@@ -129,8 +132,10 @@
             <button id="reverseLocations">Reverse Locations</button>
             <button id="findRoute">Find Route</button>
             <button id="cancelRoute">Cancel Route</button>
-            <button id="myLocation">My Location</button> <!-- My Location button -->
+            <button id="myLocation">My Location</button>
+            <button id="trekkingMode">Trekking Mode</button>
             <div id="routeInfo"></div>
+            <canvas id="elevationChart"></canvas>
             <div class="nearby">
                 <h3>Nearby Landmarks:</h3>
                 <ul id="landmarkList"></ul>
@@ -141,18 +146,27 @@
 
     <script>
         let map, directionsService, directionsRenderer, geocoder;
-        let cachedPlaces = new Map(); // Cache for storing place results
-        let isControlsVisible = true;
+        let trekkingMode = false;
+        let trekkingLine, startMarker, endMarker;
+        let elevationService;
+        let elevationData = [];
+        let landmarks = []; // Store landmark data for later use
 
         function initMap() {
             map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 14,
                 center: { lat: 37.7749, lng: -122.4194 }, // Default center (San Francisco)
+                mapTypeId: google.maps.MapTypeId.ROADMAP,
+                mapTypeControl: true,
+                mapTypeControlOptions: {
+                    position: google.maps.ControlPosition.BOTTOM_RIGHT,
+                }
             });
 
             directionsService = new google.maps.DirectionsService();
             directionsRenderer = new google.maps.DirectionsRenderer({ map: map, draggable: true });
             geocoder = new google.maps.Geocoder();
+            elevationService = new google.maps.ElevationService();
 
             const startInput = document.getElementById("start");
             const endInput = document.getElementById("end");
@@ -171,7 +185,8 @@
                 endInput.value = temp;
             });
 
-            document.getElementById("myLocation").addEventListener("click", showMyLocation); // My Location event
+            document.getElementById("myLocation").addEventListener("click", showMyLocation);
+            document.getElementById("trekkingMode").addEventListener("click", toggleTrekkingMode);
 
             google.maps.event.addListener(directionsRenderer, 'directions_changed', () => {
                 const directions = directionsRenderer.getDirections();
@@ -182,43 +197,192 @@
             });
 
             makeControlBoxDraggable();
+            map.addListener('click', (event) => {
+                if (trekkingMode) {
+                    addTrekkingMarker(event.latLng);
+                }
+            });
+        }
+
+        function toggleTrekkingMode() {
+            trekkingMode = !trekkingMode;
+            if (trekkingMode) {
+                alert("Trekking mode enabled. Click on the map to set start and end points.");
+                clearMarkers(); // Clear previous markers if any
+            } else {
+                alert("Trekking mode disabled.");
+                resetTrekkingMode(); // Clear both markers
+            }
+        }
+
+        function addTrekkingMarker(location) {
+            if (!startMarker) {
+                startMarker = new google.maps.Marker({
+                    position: location,
+                    map: map,
+                    title: "Start Point",
+                    icon: {
+                        url: "http://maps.google.com/mapfiles/ms/icons/green-dot.png"
+                    }
+                });
+            } else if (!endMarker) {
+                endMarker = new google.maps.Marker({
+                    position: location,
+                    map: map,
+                    title: "End Point",
+                    icon: {
+                        url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                    }
+                });
+                drawTrekkingLine(startMarker.getPosition(), endMarker.getPosition());
+            } else {
+                alert("Both start and end points are already set. Resetting now...");
+                resetTrekkingMode();
+                addTrekkingMarker(location); // Recur until we place the first marker
+            }
+        }
+
+        function drawTrekkingLine(start, end) {
+            if (trekkingLine) trekkingLine.setMap(null); // Remove existing line
+
+            trekkingLine = new google.maps.Polyline({
+                path: [start, end],
+                geodesic: true,
+                strokeColor: '#FF0000',
+                strokeOpacity: 1.0,
+                strokeWeight: 2
+            });
+
+            trekkingLine.setMap(map);
+            const path = trekkingLine.getPath();
+            const elevationPath = path.getArray().map(point => ({ lat: point.lat(), lng: point.lng() }));
+            getElevationAlongPath(elevationPath);
+        }
+
+        function getElevationAlongPath(path) {
+            elevationService.getElevationAlongPath({
+                path: path,
+                samples: 256
+            }, (results, status) => {
+                if (status === google.maps.ElevationStatus.OK) {
+                    elevationData = results.map(result => result.elevation);
+                    displayElevationData(elevationData);
+                } else {
+                    alert("Elevation request failed due to: " + status);
+                }
+            });
+        }
+
+        function displayElevationData(elevationInfo) {
+            const elevationStats = document.getElementById("routeInfo");
+            const elevationGain = calculateElevationGain(elevationInfo);
+            elevationStats.innerHTML = `
+                <div><strong>Elevation Stats:</strong></div>
+                <div><strong>Min Elevation:</strong> ${Math.min(...elevationInfo).toFixed(2)} meters</div>
+                <div><strong>Max Elevation:</strong> ${Math.max(...elevationInfo).toFixed(2)} meters</div>
+                <div><strong>Elevation Gain:</strong> ${elevationGain.toFixed(2)} meters</div>
+            `;
+            elevationStats.style.visibility = "visible";
+            updateElevationChart(elevationInfo);
+        }
+
+        function calculateElevationGain(elevationInfo) {
+            let gain = 0;
+            for (let i = 1; i < elevationInfo.length; i++) {
+                const diff = elevationInfo[i] - elevationInfo[i - 1];
+                if (diff > 0) gain += diff; // Only consider positive changes for gain
+            }
+            return gain;
+        }
+
+        function updateElevationChart(elevationInfo) {
+            const ctx = document.getElementById('elevationChart').getContext('2d');
+            const chartData = {
+                labels: elevationInfo.map((_, index) => index + 1),
+                datasets: [{
+                    label: 'Elevation (meters)',
+                    data: elevationInfo,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    fill: true,
+                }]
+            };
+            if (ctx.chart) {
+                ctx.chart.destroy(); // Destroy previous chart instance
+            }
+            ctx.chart = new Chart(ctx, {
+                type: 'line',
+                data: chartData,
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Elevation (m)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Points'
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         function calculateAndDisplayRoute(start, end) {
-            directionsService.route(
-                {
-                    origin: start,
-                    destination: end,
-                    travelMode: google.maps.TravelMode.DRIVING,
-                },
-                (response, status) => {
-                    if (status === "OK") {
-                        directionsRenderer.setDirections(response);
-                        displayRouteDetails(response.routes[0]);
-                        findNearbyLandmarks(response.routes[0]);
-                    } else {
-                        alert("Could not display directions due to: " + status);
-                    }
+            if (!start || !end) {
+                alert("Please enter both starting and ending locations.");
+                return;
+            }
+            geocoder.geocode({ address: start }, (results, status) => {
+                if (status === "OK") {
+                    const startLocation = results[0].geometry.location;
+                    geocoder.geocode({ address: end }, (results, status) => {
+                        if (status === "OK") {
+                            const endLocation = results[0].geometry.location;
+                            directionsService.route({
+                                origin: startLocation,
+                                destination: endLocation,
+                                travelMode: google.maps.TravelMode.WALKING, // Set travel mode to walking for trekking
+                                avoidTolls: true, // Avoid toll roads
+                                region: 'US' // Restrict to the US region
+                            }, (response, status) => {
+                                if (status === "OK") {
+                                    directionsRenderer.setDirections(response);
+                                    const directions = directionsRenderer.getDirections();
+                                    displayRouteDetails(directions.routes[0]);
+                                    findNearbyLandmarks(directions.routes[0]);
+                                } else {
+                                    alert("Directions request failed due to " + status);
+                                }
+                            });
+                        } else {
+                            alert("Could not geocode destination: " + status);
+                        }
+                    });
+                } else {
+                    alert("Could not geocode starting location: " + status);
                 }
-            );
-        }
-
-        function resetRoute() {
-            directionsRenderer.setDirections({ routes: [] });
-            document.getElementById("start").value = '';
-            document.getElementById("end").value = '';
-            document.getElementById("landmarkList").innerHTML = '';
-            document.getElementById("routeInfo").innerHTML = '';
+            });
         }
 
         function displayRouteDetails(route) {
-            const routeInfo = document.getElementById("routeInfo");
-            const leg = route.legs[0];
-            routeInfo.innerHTML = `
-                <div><strong>Distance:</strong> ${leg.distance.text}</div>
-                <div><strong>Duration:</strong> ${leg.duration.text}</div>
+            const routeStats = document.getElementById("routeInfo");
+            const distance = route.legs[0].distance.text;
+            const duration = route.legs[0].duration.text;
+            routeStats.innerHTML = `
+                <div><strong>Route Details:</strong></div>
+                <div><strong>Distance:</strong> ${distance}</div>
+                <div><strong>Duration:</strong> ${duration}</div>
             `;
+            routeStats.style.visibility = "visible"; // Show route info
         }
+
 
         function findNearbyLandmarks(route) {
             const service = new google.maps.places.PlacesService(map);
@@ -285,6 +449,8 @@
             });
         }
 
+
+        
         function showMyLocation() {
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(position => {
@@ -298,45 +464,79 @@
                         map: map,
                         title: "You are here!",
                         icon: {
-                            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png" // Custom blue marker
+                            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
                         }
                     });
                 }, () => {
                     handleLocationError(true);
                 });
             } else {
-                // Browser doesn't support Geolocation
                 handleLocationError(false);
             }
         }
 
-        function handleLocationError(browserHasGeolocation) {
-            alert(browserHasGeolocation ?
-                "Error: The Geolocation service failed." :
-                "Error: Your browser doesn't support geolocation.");
+        function resetRoute() {
+            directionsRenderer.set('directions', null);
+            resetTrekkingMode();
+            document.getElementById("routeInfo").style.visibility = "hidden"; // Hide route info
+            document.getElementById("landmarkList").innerHTML = ""; // Clear landmarks
+        }
+
+        function resetTrekkingMode() {
+            clearMarkers();
+            if (trekkingLine) trekkingLine.setMap(null);
+            trekkingLine = null;
+            elevationData = [];
+            document.getElementById("routeInfo").style.visibility = "hidden"; // Hide route info
+            const ctx = document.getElementById('elevationChart').getContext('2d');
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); // Clear elevation chart
+            if (ctx.chart) {
+                ctx.chart.destroy(); // Destroy previous chart instance
+            }
+        }
+
+        function clearMarkers() {
+            if (startMarker) startMarker.setMap(null);
+            if (endMarker) endMarker.setMap(null);
+            startMarker = null;
+            endMarker = null;
         }
 
         function makeControlBoxDraggable() {
-            const controlBox = document.getElementById("controlBox");
-            let isDragging = false, startX, startY;
+            const controlBox = document.getElementById('controlBox');
+            let isDragging = false;
+            let offsetX, offsetY;
 
-            controlBox.addEventListener("mousedown", (e) => {
+            controlBox.addEventListener('mousedown', (e) => {
                 isDragging = true;
-                startX = e.clientX - controlBox.offsetLeft;
-                startY = e.clientY - controlBox.offsetTop;
+                offsetX = e.clientX - controlBox.getBoundingClientRect().left;
+                offsetY = e.clientY - controlBox.getBoundingClientRect().top;
             });
 
-            document.addEventListener("mousemove", (e) => {
-                if (isDragging) {
-                    controlBox.style.left = `${e.clientX - startX}px`;
-                    controlBox.style.top = `${e.clientY - startY}px`;
-                }
-            });
-
-            document.addEventListener("mouseup", () => {
+            document.addEventListener('mouseup', () => {
                 isDragging = false;
             });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    controlBox.style.left = `${e.clientX - offsetX}px`;
+                    controlBox.style.top = `${e.clientY - offsetY}px`;
+                }
+            });
         }
+
+        // Function to toggle visibility of control content
+        document.getElementById("toggleMenu").onclick = function() {
+            const controlContent = document.getElementById("controlContent");
+            const toggleIcon = document.getElementById("toggleIcon");
+            if (controlContent.style.display === "none" || controlContent.style.display === "") {
+                controlContent.style.display = "block";
+                toggleIcon.textContent = "▲"; // Change icon to up arrow
+            } else {
+                controlContent.style.display = "none";
+                toggleIcon.textContent = "▼"; // Change icon to down arrow
+            }
+        };
 
         window.onload = initMap;
     </script>
