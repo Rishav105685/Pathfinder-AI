@@ -30,6 +30,7 @@
             top: 20px;
             left: 20px;
             z-index: 1;
+            cursor: move; /* Make control box draggable */
         }
         h1 {
             margin: 0 0 15px;
@@ -80,8 +81,8 @@
             margin-top: 20px;
             border-top: 1px solid #ccc;
             padding-top: 10px;
-            max-height: 150px; /* Set a maximum height for the nearby section */
-            overflow-y: auto; /* Enable vertical scrolling */
+            max-height: 150px;
+            overflow-y: auto;
         }
         .nearby h3 {
             margin: 0;
@@ -98,8 +99,7 @@
             padding: 8px;
             background-color: #e9ecef;
             border-radius: 5px;
-            transition: background-color 0.3s;
-            cursor: pointer; /* Change cursor to pointer for clickable items */
+            cursor: pointer;
         }
         .nearby li:hover {
             background-color: #d1d1d1;
@@ -121,13 +121,15 @@
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDfTc5T0evpoUvZrFYM0DETGibUL64zDu4&libraries=places"></script>
 </head>
 <body>
-    <div class="controls">
+    <div class="controls" id="controlBox">
         <div id="toggleMenu">Controls <span id="toggleIcon">▼</span></div>
         <div id="controlContent">
             <input id="start" type="text" placeholder="Starting Address" />
             <input id="end" type="text" placeholder="Destination Address" />
+            <button id="reverseLocations">Reverse Locations</button>
             <button id="findRoute">Find Route</button>
             <button id="cancelRoute">Cancel Route</button>
+            <button id="myLocation">My Location</button> <!-- My Location button -->
             <div id="routeInfo"></div>
             <div class="nearby">
                 <h3>Nearby Landmarks:</h3>
@@ -136,120 +138,50 @@
         </div>
     </div>
     <div id="map"></div>
-    <div id="scale"></div>
 
     <script>
-        let map;
-        let directionsService;
-        let directionsRenderer;
-        let geocoder;
-        const cachedPlaces = new Map(); // Cache for storing place results
-        let isControlsVisible = true; // Track visibility of controls
+        let map, directionsService, directionsRenderer, geocoder;
+        let cachedPlaces = new Map(); // Cache for storing place results
+        let isControlsVisible = true;
 
         function initMap() {
             map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 14,
                 center: { lat: 37.7749, lng: -122.4194 }, // Default center (San Francisco)
-                scaleControl: true,
             });
 
             directionsService = new google.maps.DirectionsService();
-            directionsRenderer = new google.maps.DirectionsRenderer({
-                draggable: true,
-                map: map,
-                panel: null,
-            });
+            directionsRenderer = new google.maps.DirectionsRenderer({ map: map, draggable: true });
             geocoder = new google.maps.Geocoder();
 
             const startInput = document.getElementById("start");
             const endInput = document.getElementById("end");
-
-            const autocompleteStart = new google.maps.places.Autocomplete(startInput);
-            const autocompleteEnd = new google.maps.places.Autocomplete(endInput);
-
-            // Geolocation to center map
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition((position) => {
-                    const pos = {
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude,
-                    };
-                    console.log("User Location (Geolocation API):", pos);
-                    map.setCenter(pos);
-                    new google.maps.Marker({
-                        position: pos,
-                        map: map,
-                        title: "Your Location",
-                        icon: {
-                            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-                        }
-                    });
-                }, () => {
-                    console.log("Geolocation failed. Using default location.");
-                    handleLocationError(true);
-                });
-            } else {
-                handleLocationError(false);
-            }
+            new google.maps.places.Autocomplete(startInput);
+            new google.maps.places.Autocomplete(endInput);
 
             document.getElementById("findRoute").addEventListener("click", () => {
-                const startAddress = startInput.value;
-                const endAddress = endInput.value;
-
-                // Use Geocoding API to get lat/lng for start and end addresses
-                geocoder.geocode({ address: startAddress }, (results, status) => {
-                    if (status === 'OK') {
-                        const startLocation = results[0].geometry.location;
-                        geocoder.geocode({ address: endAddress }, (results, status) => {
-                            if (status === 'OK') {
-                                const endLocation = results[0].geometry.location;
-                                calculateAndDisplayRoute(startLocation, endLocation);
-                            } else {
-                                alert('Could not find the destination location. Please try again.');
-                            }
-                        });
-                    } else {
-                        alert('Could not find the starting location. Please try again.');
-                    }
-                });
+                calculateAndDisplayRoute(startInput.value, endInput.value);
             });
 
-            document.getElementById("cancelRoute").addEventListener("click", () => {
-                // Clear directions and reset inputs for new search
-                directionsRenderer.setMap(null); // Remove the current route from the map
-                directionsRenderer.setMap(map); // Reattach the directions renderer to the map
-                document.getElementById("landmarkList").innerHTML = ''; // Clear landmarks
-                startInput.value = '';
-                endInput.value = '';
+            document.getElementById("cancelRoute").addEventListener("click", resetRoute);
+
+            document.getElementById("reverseLocations").addEventListener("click", () => {
+                const temp = startInput.value;
+                startInput.value = endInput.value;
+                endInput.value = temp;
             });
+
+            document.getElementById("myLocation").addEventListener("click", showMyLocation); // My Location event
 
             google.maps.event.addListener(directionsRenderer, 'directions_changed', () => {
                 const directions = directionsRenderer.getDirections();
                 if (directions) {
-                    const route = directions.routes[0];
-                    findNearbyLandmarks(route);
+                    displayRouteDetails(directions.routes[0]);
+                    findNearbyLandmarks(directions.routes[0]);
                 }
             });
 
-            // Toggle control display
-            document.getElementById("toggleMenu").addEventListener("click", () => {
-                const controlContent = document.getElementById("controlContent");
-                controlContent.style.display = isControlsVisible ? "none" : "flex"; // Toggle visibility
-                document.getElementById("toggleIcon").innerText = isControlsVisible ? "▲" : "▼"; // Change icon
-                isControlsVisible = !isControlsVisible; // Update visibility state
-            });
-
-            // Dynamic scale
-            google.maps.event.addListener(map, 'zoom_changed', () => {
-                const zoomLevel = map.getZoom();
-                document.getElementById("scale").innerText = `Zoom Level: ${zoomLevel}`;
-            });
-        }
-
-        function handleLocationError(browserHasGeolocation) {
-            const pos = { lat: 37.7749, lng: -122.4194 }; // Default location (San Francisco)
-            map.setCenter(pos);
-            alert(browserHasGeolocation ? 'Error: The Geolocation service failed.' : 'Error: Your browser doesn\'t support geolocation.');
+            makeControlBoxDraggable();
         }
 
         function calculateAndDisplayRoute(start, end) {
@@ -260,54 +192,89 @@
                     travelMode: google.maps.TravelMode.DRIVING,
                 },
                 (response, status) => {
-                    if (status === 'OK') {
+                    if (status === "OK") {
                         directionsRenderer.setDirections(response);
-                        findNearbyLandmarks(response.routes[0]); // Find landmarks along the route
+                        displayRouteDetails(response.routes[0]);
+                        findNearbyLandmarks(response.routes[0]);
                     } else {
-                        alert('Directions request failed due to ' + status);
+                        alert("Could not display directions due to: " + status);
                     }
                 }
             );
         }
 
+        function resetRoute() {
+            directionsRenderer.setDirections({ routes: [] });
+            document.getElementById("start").value = '';
+            document.getElementById("end").value = '';
+            document.getElementById("landmarkList").innerHTML = '';
+            document.getElementById("routeInfo").innerHTML = '';
+        }
+
+        function displayRouteDetails(route) {
+            const routeInfo = document.getElementById("routeInfo");
+            const leg = route.legs[0];
+            routeInfo.innerHTML = `
+                <div><strong>Distance:</strong> ${leg.distance.text}</div>
+                <div><strong>Duration:</strong> ${leg.duration.text}</div>
+            `;
+        }
+
         function findNearbyLandmarks(route) {
             const service = new google.maps.places.PlacesService(map);
-            const bounds = new google.maps.LatLngBounds();
-
-            // Extend the bounds to include the route path
-            route.legs.forEach(leg => {
-                leg.steps.forEach(step => {
-                    bounds.extend(step.start_location);
-                    bounds.extend(step.end_location);
+            const path = route.overview_path;
+        
+            // Limit the number of landmark searches (e.g., 3 searches along the route)
+            const numberOfSearches = 3; // Adjust as needed for more or fewer searches
+            const segmentLength = Math.floor(path.length / (numberOfSearches + 1)); // +1 to include both ends
+        
+            // Check the distance of the route to decide on landmark types
+            const distanceInMeters = route.legs[0].distance.value; // Get distance from the route's legs
+            let types;
+            if (distanceInMeters < 5000) { // Short route
+                types = ['restaurant', 'cafe', 'park']; // Different types for short routes
+            } else if (distanceInMeters < 20000) { // Medium route
+                types = ['restaurant', 'gas_station', 'hotel'];
+            } else { // Long route
+                types = ['restaurant', 'gas_station', 'hotel', 'atm', 'parking'];
+            }
+        
+            // Search at evenly spaced points along the path
+            const searchedLocations = new Set(); // Use a set to avoid duplicate searches
+            for (let i = 1; i <= numberOfSearches; i++) {
+                const pointIndex = i * segmentLength;
+                const searchLocation = path[pointIndex];
+        
+                // Skip if already searched
+                const locKey = `${searchLocation.lat()},${searchLocation.lng()}`;
+                if (searchedLocations.has(locKey)) continue;
+                searchedLocations.add(locKey);
+        
+                const request = {
+                    location: searchLocation,
+                    radius: '1000', // Search radius (in meters)
+                    types: types, // Use dynamic types based on distance
+                };
+        
+                service.nearbySearch(request, (results, status) => {
+                    if (status === google.maps.places.PlacesServiceStatus.OK) {
+                        displayLandmarks(results);
+                    } else {
+                        console.error('Places service failed due to ' + status);
+                    }
                 });
-            });
-            map.fitBounds(bounds); // Adjust map to show the route
-
-            // Search for nearby landmarks
-            const request = {
-                location: bounds.getCenter(),
-                radius: '500', // Define radius for the search (in meters)
-                type: ['restaurant', 'gas_station'], // Search for restaurants and petrol stations
-            };
-
-            service.nearbySearch(request, (results, status) => {
-                if (status === google.maps.places.PlacesServiceStatus.OK) {
-                    displayLandmarks(results);
-                } else {
-                    console.error('Places service failed due to ' + status);
-                }
-            });
+            }
         }
 
         function displayLandmarks(landmarks) {
             const landmarkList = document.getElementById("landmarkList");
-            landmarkList.innerHTML = ''; // Clear previous landmarks
+            landmarkList.innerHTML = '';
             landmarks.forEach(landmark => {
                 const li = document.createElement("li");
                 li.innerText = landmark.name;
                 li.onclick = () => {
-                    map.setCenter(landmark.geometry.location); // Center map on landmark
-                    map.setZoom(15); // Optionally zoom in on the landmark
+                    map.setCenter(landmark.geometry.location);
+                    map.setZoom(15);
                 };
                 landmarkList.appendChild(li);
                 new google.maps.Marker({
@@ -318,7 +285,60 @@
             });
         }
 
-        window.onload = initMap; // Initialize the map when the window loads
+        function showMyLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    const pos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude
+                    };
+                    map.setCenter(pos);
+                    new google.maps.Marker({
+                        position: pos,
+                        map: map,
+                        title: "You are here!",
+                        icon: {
+                            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png" // Custom blue marker
+                        }
+                    });
+                }, () => {
+                    handleLocationError(true);
+                });
+            } else {
+                // Browser doesn't support Geolocation
+                handleLocationError(false);
+            }
+        }
+
+        function handleLocationError(browserHasGeolocation) {
+            alert(browserHasGeolocation ?
+                "Error: The Geolocation service failed." :
+                "Error: Your browser doesn't support geolocation.");
+        }
+
+        function makeControlBoxDraggable() {
+            const controlBox = document.getElementById("controlBox");
+            let isDragging = false, startX, startY;
+
+            controlBox.addEventListener("mousedown", (e) => {
+                isDragging = true;
+                startX = e.clientX - controlBox.offsetLeft;
+                startY = e.clientY - controlBox.offsetTop;
+            });
+
+            document.addEventListener("mousemove", (e) => {
+                if (isDragging) {
+                    controlBox.style.left = `${e.clientX - startX}px`;
+                    controlBox.style.top = `${e.clientY - startY}px`;
+                }
+            });
+
+            document.addEventListener("mouseup", () => {
+                isDragging = false;
+            });
+        }
+
+        window.onload = initMap;
     </script>
 </body>
 </html>
