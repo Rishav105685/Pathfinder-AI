@@ -12,6 +12,7 @@
             height: 100%;
             margin: 0;
             font-family: 'Arial', sans-serif;
+            overflow: hidden;
         }
         #map {
             height: 100%;
@@ -21,7 +22,7 @@
         .controls {
             display: flex;
             flex-direction: column;
-            padding: 20px;
+            padding: 10px; /* Reduced padding to minimize empty space */
             background-color: rgba(255, 255, 255, 0.9);
             border-radius: 10px;
             box-shadow: 0px 0px 30px rgba(0, 0, 0, 0.2);
@@ -32,6 +33,7 @@
             z-index: 1;
             cursor: move;
         }
+        
         h1 {
             margin: 0 0 15px;
             font-size: 24px;
@@ -61,6 +63,11 @@
             transition: background-color 0.3s;
             margin-bottom: 10px;
         }
+        button.active {
+            background-color: white; /* Change button color to white when active */
+            color: #007BFF; /* Change text color for contrast */
+        }
+        
         button:hover {
             background-color: #0056b3;
         }
@@ -83,9 +90,12 @@
             margin-top: 20px;
             border-top: 1px solid #ccc;
             padding-top: 10px;
-            max-height: 150px;
-            overflow-y: auto;
+            max-height: 300px; /* Change this to your desired max height */
+            overflow-y: auto; /* Allow scrolling if content exceeds this height */
+            transition: max-height 0.5s ease; /* Smooth transition */
+            opacity: 1; /* Start visible */
         }
+        
         .nearby h3 {
             margin: 0;
             font-size: 16px;
@@ -155,13 +165,17 @@
         function initMap() {
             map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 14,
-                center: { lat: 37.7749, lng: -122.4194 }, // Default center (San Francisco)
+                center: { lat: 37.7749, lng: -122.4194 },
                 mapTypeId: google.maps.MapTypeId.ROADMAP,
                 mapTypeControl: true,
                 mapTypeControlOptions: {
-                    position: google.maps.ControlPosition.BOTTOM_RIGHT,
+                    position: google.maps.ControlPosition.TOP_RIGHT, // Moved to top-right
+                },
+                scaleControl: true, // Added scale control
+                scaleControlOptions: {
+                    position: google.maps.ControlPosition.BOTTOM_RIGHT // Position for scale control
                 }
-            });
+            });        
 
             directionsService = new google.maps.DirectionsService();
             directionsRenderer = new google.maps.DirectionsRenderer({ map: map, draggable: true });
@@ -206,14 +220,17 @@
 
         function toggleTrekkingMode() {
             trekkingMode = !trekkingMode;
+            const trekkingButton = document.getElementById("trekkingMode");
+        
             if (trekkingMode) {
-                alert("Trekking mode enabled. Click on the map to set start and end points.");
-                clearMarkers(); // Clear previous markers if any
+                trekkingButton.classList.add("active");
             } else {
-                alert("Trekking mode disabled.");
-                resetTrekkingMode(); // Clear both markers
+                trekkingButton.classList.remove("active");
+                resetTrekkingMode(); // Call reset function to clear everything
             }
         }
+        
+        
 
         function addTrekkingMarker(location) {
             if (!startMarker) {
@@ -236,11 +253,11 @@
                 });
                 drawTrekkingLine(startMarker.getPosition(), endMarker.getPosition());
             } else {
-                alert("Both start and end points are already set. Resetting now...");
-                resetTrekkingMode();
+                resetTrekkingMode(); // Just reset the markers without alert
                 addTrekkingMarker(location); // Recur until we place the first marker
             }
         }
+        
 
         function drawTrekkingLine(start, end) {
             if (trekkingLine) trekkingLine.setMap(null); // Remove existing line
@@ -348,15 +365,16 @@
                             directionsService.route({
                                 origin: startLocation,
                                 destination: endLocation,
-                                travelMode: google.maps.TravelMode.WALKING, // Set travel mode to walking for trekking
-                                avoidTolls: true, // Avoid toll roads
-                                region: 'US' // Restrict to the US region
+                                travelMode: google.maps.TravelMode.WALKING,
+                                avoidTolls: true,
+                                region: 'US'
                             }, (response, status) => {
                                 if (status === "OK") {
                                     directionsRenderer.setDirections(response);
                                     const directions = directionsRenderer.getDirections();
                                     displayRouteDetails(directions.routes[0]);
                                     findNearbyLandmarks(directions.routes[0]);
+                                    document.querySelector('.nearby').style.display = "block"; // Show landmarks
                                 } else {
                                     alert("Directions request failed due to " + status);
                                 }
@@ -370,6 +388,7 @@
                 }
             });
         }
+         
 
         function displayRouteDetails(route) {
             const routeStats = document.getElementById("routeInfo");
@@ -449,7 +468,28 @@
             });
         }
 
-
+        function updateNearbyLandmarks(landmarks) {
+            const nearbyContainer = document.querySelector('.nearby');
+            const landmarkList = document.getElementById("landmarkList");
+            
+            landmarkList.innerHTML = ""; // Clear existing landmarks
+            landmarks.forEach(landmark => {
+                const li = document.createElement("li");
+                li.textContent = landmark.name; // Adjust according to your landmark data
+                landmarkList.appendChild(li);
+            });
+        
+            // Adjust visibility based on content
+            if (landmarks.length > 0) {
+                nearbyContainer.style.maxHeight = "300px"; // Show container with a maximum height
+                nearbyContainer.style.opacity = "1"; // Ensure it's visible
+            } else {
+                nearbyContainer.style.maxHeight = "0"; // Hide container
+                nearbyContainer.style.opacity = "0"; // Make it invisible
+                nearbyContainer.style.overflowY = "hidden"; // No scrolling when hidden
+            }
+        }
+        
         
         function showMyLocation() {
             if (navigator.geolocation) {
@@ -480,20 +520,27 @@
             resetTrekkingMode();
             document.getElementById("routeInfo").style.visibility = "hidden"; // Hide route info
             document.getElementById("landmarkList").innerHTML = ""; // Clear landmarks
+            document.querySelector('.nearby').style.display = "none"; // Hide landmarks
         }
+        
 
         function resetTrekkingMode() {
             clearMarkers();
             if (trekkingLine) trekkingLine.setMap(null);
             trekkingLine = null;
             elevationData = [];
-            document.getElementById("routeInfo").style.visibility = "hidden"; // Hide route info
+            
+            // Clear the elevation chart
             const ctx = document.getElementById('elevationChart').getContext('2d');
-            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); // Clear elevation chart
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             if (ctx.chart) {
                 ctx.chart.destroy(); // Destroy previous chart instance
             }
+        
+            // Hide route info
+            document.getElementById("routeInfo").style.visibility = "hidden";
         }
+        
 
         function clearMarkers() {
             if (startMarker) startMarker.setMap(null);
@@ -542,3 +589,4 @@
     </script>
 </body>
 </html>
+
