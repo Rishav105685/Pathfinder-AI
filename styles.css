@@ -129,3 +129,25 @@ button:hover {
         left: 10px;
     }
 }
+
+#longDriveControls {
+    margin-top: 5px;
+}
+
+#longDriveControls input {
+    margin-bottom: 5px;
+    padding: 8px;
+    border: 1px solid #007BFF;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
+#longDriveControls button {
+    padding: 8px;
+    background-color: #007BFF;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
