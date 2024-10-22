@@ -7,8 +7,8 @@ let landmarks = []; // Store landmark data for later use
 
 function initMap() {
     map = new google.maps.Map(document.getElementById("map"), {
-        zoom: 14,
-        center: { lat: 37.7749, lng: -122.4194 },
+        zoom: 4.8, // Adjusted zoom level to cover the whole country
+        center: { lat: 22.5, lng: 78.9629 }, // Central coordinates of India
         mapTypeId: google.maps.MapTypeId.ROADMAP,
         mapTypeControl: true,
         mapTypeControlOptions: {
@@ -18,12 +18,16 @@ function initMap() {
         scaleControlOptions: {
             position: google.maps.ControlPosition.BOTTOM_RIGHT // Position for scale control
         }
-    });        
+    });
+            
 
     directionsService = new google.maps.DirectionsService();
     directionsRenderer = new google.maps.DirectionsRenderer({ map: map, draggable: true });
     geocoder = new google.maps.Geocoder();
+    directionsRenderer.setMap(map);
     elevationService = new google.maps.ElevationService();
+    placesService = new google.maps.places.PlacesService(map);
+    distanceMatrixService = new google.maps.DistanceMatrixService();
 
     const startInput = document.getElementById("start");
     const endInput = document.getElementById("end");
@@ -35,6 +39,9 @@ function initMap() {
     });
 
     document.getElementById("cancelRoute").addEventListener("click", resetRoute);
+    document.getElementById('longDriveMode').addEventListener('click', toggleLongDriveMode);
+    document.getElementById('generateDrive').addEventListener('click', generateLongDrive);
+
 
     document.getElementById("reverseLocations").addEventListener("click", () => {
         const temp = startInput.value;
@@ -438,5 +445,78 @@ document.getElementById("toggleMenu").onclick = function() {
         toggleIcon.textContent = "▼"; // Change icon to down arrow
     }
 };
+
+function toggleLongDriveMode() {
+    const longDriveControls = document.getElementById('longDriveControls');
+    if (longDriveControls.style.display === "none") {
+        longDriveControls.style.display = "block";
+    } else {
+        longDriveControls.style.display = "none";
+    }
+}
+
+function generateLongDrive() {
+    const driveDuration = parseFloat(document.getElementById('driveDuration').value) || 2; // Default to 2 hours
+    const driveIntentions = document.getElementById('driveIntentions').value || 'scenic view';
+
+    const startLocation = document.getElementById('start').value;
+    
+    if (!startLocation) {
+        alert('Please enter a starting location.');
+        return;
+    }
+
+    // Use Places API to find landmarks based on the intentions within a certain radius
+    const request = {
+        location: map.getCenter(),
+        radius: '50000', // 50 km radius from the start point
+        query: driveIntentions
+    };
+
+    placesService.textSearch(request, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK) {
+            const landmarks = results.slice(0, 5); // Limit to 5 landmarks for simplicity
+            calculateLongDriveRoute(startLocation, landmarks, driveDuration);
+        } else {
+            alert('No landmarks found matching your intentions.');
+        }
+    });
+}
+
+function calculateLongDriveRoute(start, landmarks, driveDuration) {
+    const waypointList = landmarks.map(place => ({
+        location: place.geometry.location,
+        stopover: true
+    }));
+
+    const routeRequest = {
+        origin: start,
+        destination: start, // Round trip back to the starting point
+        waypoints: waypointList,
+        travelMode: 'DRIVING',
+        optimizeWaypoints: true
+    };
+
+    directionsService.route(routeRequest, (result, status) => {
+        if (status === 'OK') {
+            directionsRenderer.setDirections(result);
+
+            // Calculate total trip time using Distance Matrix API
+            const waypointLocations = [start].concat(landmarks.map(l => l.geometry.location));
+            distanceMatrixService.getDistanceMatrix({
+                origins: [start],
+                destinations: waypointLocations,
+                travelMode: 'DRIVING',
+            }, (response, status) => {
+                if (status === 'OK') {
+                    const totalDuration = response.rows[0].elements.reduce((sum, elem) => sum + elem.duration.value, 0) / 3600; // Convert to hours
+                }
+            });
+        } else {
+            alert('Could not calculate the route.');
+        }
+    });
+}
+
 
 window.onload = initMap;
