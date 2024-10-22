@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Maps Trekking Mode</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDfTc5T0evpoUvZrFYM0DETGibUL64zDu4&libraries=places,geometry"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="controls" id="controlBox">
+        <div id="toggleMenu">Controls <span id="toggleIcon">▼</span></div>
+        <div id="controlContent">
+            <input id="start" type="text" placeholder="Starting Address" />
+            <input id="end" type="text" placeholder="Destination Address" />
+            <button id="reverseLocations">Reverse</button>
+            <button id="findRoute">Find Route</button>
+            <button id="cancelRoute">Cancel</button>
+            <button id="myLocation">My Location</button>
+            <button id="trekkingMode">Trekking</button>
+            <div id="routeInfo" style="visibility:hidden;"></div>
+            <canvas id="elevationChart"></canvas>
+            <div class="nearby" style="display:none;">
+                <h3>Nearby Landmarks:</h3>
+                <ul id="landmarkList"></ul>
+            </div>
+        </div>
+    </div>
+    <div id="map"></div>
+    <script src="scripts.js"></script>
+</body>
+</html>
