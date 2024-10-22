@@ -12,13 +12,23 @@
     <div class="controls" id="controlBox">
         <div id="toggleMenu">Controls <span id="toggleIcon">▼</span></div>
         <div id="controlContent">
+            <!-- Existing Controls -->
             <input id="start" type="text" placeholder="Starting Address" />
+            <button id="findRoute">Find Route</button>
             <input id="end" type="text" placeholder="Destination Address" />
             <button id="reverseLocations">Reverse</button>
-            <button id="findRoute">Find Route</button>
-            <button id="cancelRoute">Cancel</button>
+            <button id="cancelRoute">Cancel Route</button>
             <button id="myLocation">My Location</button>
-            <button id="trekkingMode">Trekking</button>
+            <button id="trekkingMode">Trekking Mode</button>
+    
+            <!-- New Controls for Long Drive -->
+            <button id="longDriveMode">Long Drive</button>
+            <div id="longDriveControls" style="display:none;">
+                <input id="driveDuration" type="number" placeholder="Drive Duration (hours)" />
+                <input id="driveIntentions" type="text" placeholder="Drive Intentions (e.g., scenic views)" />
+                <button id="generateDrive">Generate Drive</button>
+            </div>
+    
             <div id="routeInfo" style="visibility:hidden;"></div>
             <canvas id="elevationChart"></canvas>
             <div class="nearby" style="display:none;">
@@ -27,6 +37,7 @@
             </div>
         </div>
     </div>
+    
     <div id="map"></div>
     <script src="scripts.js"></script>
 </body>
