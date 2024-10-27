@@ -1,4 +1,4 @@
-let map, directionsService, directionsRenderer, geocoder;
+let map, directionsService, directionsRenderer, geocoder, service;
 let trekkingMode = false;
 let trekkingLine, startMarker, endMarker;
 let elevationService;
@@ -41,14 +41,7 @@ function initMap() {
     document.getElementById("cancelRoute").addEventListener("click", resetRoute);
     document.getElementById('longDriveMode').addEventListener('click', toggleLongDriveMode);
     document.getElementById('generateDrive').addEventListener('click', generateLongDrive);
-
-
-    document.getElementById("reverseLocations").addEventListener("click", () => {
-        const temp = startInput.value;
-        startInput.value = endInput.value;
-        endInput.value = temp;
-    });
-
+    document.getElementById('reverseLocations').addEventListener('click', reverseLocations);
     document.getElementById("myLocation").addEventListener("click", showMyLocation);
     document.getElementById("trekkingMode").addEventListener("click", toggleTrekkingMode);
 
@@ -66,7 +59,40 @@ function initMap() {
             addTrekkingMarker(event.latLng);
         }
     });
+    
 }
+
+// Function to toggle visibility of control content
+document.getElementById("toggleMenu").onclick = function() {
+    const controlContent = document.getElementById("controlContent");
+    const toggleIcon = document.getElementById("toggleIcon");
+    if (controlContent.style.display === "none" || controlContent.style.display === "") {
+        controlContent.style.display = "block";
+        toggleIcon.textContent = "▲"; // Change icon to up arrow
+    } else {
+        controlContent.style.display = "none";
+        toggleIcon.textContent = "▼"; // Change icon to down arrow
+    }
+};
+
+window.onload = initMap;
+
+// Function to reverse the start and end locations
+function reverseLocations() {
+    const startInput = document.getElementById('start');
+    const endInput = document.getElementById('end');
+
+    // Swap the values
+    const temp = startInput.value;
+    startInput.value = endInput.value;
+    endInput.value = temp;
+
+    // Call findRoute to update the route with new start and end
+    document.getElementById("findRoute").addEventListener("click", () => {
+        calculateAndDisplayRoute(startInput.value, endInput.value);
+    });
+}
+
 
 function toggleTrekkingMode() {
     trekkingMode = !trekkingMode;
@@ -113,9 +139,18 @@ function updateTrekkingLine() {
 
     trekkingLine.setMap(map);
 
+    // Calculate cumulative distances between each marker
+    const distances = [];
+    let totalDistance = 0;
+    for (let i = 1; i < path.length; i++) {
+        const segmentDistance = google.maps.geometry.spherical.computeDistanceBetween(path[i - 1], path[i]) / 1000; // Convert to km
+        totalDistance += segmentDistance;
+        distances.push(totalDistance); // Cumulative distance from start
+    }
+
     // Convert the path to an array of lat/lng objects for elevation
     const elevationPath = path.map(point => ({ lat: point.lat(), lng: point.lng() }));
-    getElevationAlongPath(elevationPath); // Update the elevation based on the new path
+    getElevationAlongPath(elevationPath, distances, totalDistance); // Update with cumulative distances
 }
 
 
@@ -137,31 +172,39 @@ function drawTrekkingLine(start, end) {
     getElevationAlongPath(elevationPath);
 }
 
-function getElevationAlongPath(path) {
+function getElevationAlongPath(path, distances, totalDistance) {
     elevationService.getElevationAlongPath({
         path: path,
         samples: 256
     }, (results, status) => {
         if (status === google.maps.ElevationStatus.OK) {
             elevationData = results.map(result => result.elevation);
-            displayElevationData(elevationData);
+            displayElevationData(elevationData, distances, totalDistance); // Pass distances and totalDistance to display function
         } else {
             alert("Elevation request failed due to: " + status);
         }
     });
 }
 
-function displayElevationData(elevationInfo) {
+function displayElevationData(elevationInfo, distances, totalDistance) {
     const elevationStats = document.getElementById("routeInfo");
     const elevationGain = calculateElevationGain(elevationInfo);
+
+    // Estimate time with average hiking speed on inclined terrain
+    const avgSpeed = 5; // km/h on flat
+    const slopeFactor = 1 + (elevationGain / totalDistance / 10); // Rough estimate factor for slope impact
+    const estimatedTime = (totalDistance / avgSpeed) * slopeFactor/5.6; // in hours
+
     elevationStats.innerHTML = `
-        <div><strong>Elevation Stats:</strong></div>
+        <div><strong>Trekking Stats:</strong></div>
+        <div><strong>Total Distance:</strong> ${totalDistance.toFixed(2)} km</div>
+        <div><strong>Estimated Time:</strong> ${estimatedTime.toFixed(2)} hours</div>
         <div><strong>Min Elevation:</strong> ${Math.min(...elevationInfo).toFixed(2)} meters</div>
         <div><strong>Max Elevation:</strong> ${Math.max(...elevationInfo).toFixed(2)} meters</div>
         <div><strong>Elevation Gain:</strong> ${elevationGain.toFixed(2)} meters</div>
     `;
     elevationStats.style.visibility = "visible";
-    updateElevationChart(elevationInfo);
+    updateElevationChart(elevationInfo, distances);
 }
 
 function calculateElevationGain(elevationInfo) {
@@ -204,7 +247,7 @@ function updateElevationChart(elevationInfo) {
                 x: {
                     title: {
                         display: true,
-                        text: 'Points'
+                        text: 'Distance Split Points(x/261)'
                     }
                 }
             }
@@ -226,7 +269,7 @@ function calculateAndDisplayRoute(start, end) {
                     directionsService.route({
                         origin: startLocation,
                         destination: endLocation,
-                        travelMode: google.maps.TravelMode.WALKING,
+                        travelMode: google.maps.TravelMode.DRIVING,
                         avoidTolls: true,
                         region: 'US'
                     }, (response, status) => {
@@ -433,19 +476,6 @@ function makeControlBoxDraggable() {
     });
 }
 
-// Function to toggle visibility of control content
-document.getElementById("toggleMenu").onclick = function() {
-    const controlContent = document.getElementById("controlContent");
-    const toggleIcon = document.getElementById("toggleIcon");
-    if (controlContent.style.display === "none" || controlContent.style.display === "") {
-        controlContent.style.display = "block";
-        toggleIcon.textContent = "▲"; // Change icon to up arrow
-    } else {
-        controlContent.style.display = "none";
-        toggleIcon.textContent = "▼"; // Change icon to down arrow
-    }
-};
-
 function toggleLongDriveMode() {
     const longDriveControls = document.getElementById('longDriveControls');
     if (longDriveControls.style.display === "none") {
@@ -456,7 +486,7 @@ function toggleLongDriveMode() {
 }
 
 function generateLongDrive() {
-    const driveDuration = parseFloat(document.getElementById('driveDuration').value) || 2; // Default to 2 hours
+    const driveDuration = parseFloat(document.getElementById('driveDuration').value) || 3; // Default to 3 hours if not provided
     const driveIntentions = document.getElementById('driveIntentions').value || 'scenic view';
 
     const startLocation = document.getElementById('start').value;
@@ -466,16 +496,16 @@ function generateLongDrive() {
         return;
     }
 
-    // Use Places API to find landmarks based on the intentions within a certain radius
+    // Search for landmarks within a 50 km radius based on user intentions
     const request = {
         location: map.getCenter(),
-        radius: '50000', // 50 km radius from the start point
+        radius: '5000'*driveDuration, // 50 km radius
         query: driveIntentions
     };
 
     placesService.textSearch(request, (results, status) => {
         if (status === google.maps.places.PlacesServiceStatus.OK) {
-            const landmarks = results.slice(0, 5); // Limit to 5 landmarks for simplicity
+            const landmarks = results.slice(0, 5); // Use top 5 landmarks
             calculateLongDriveRoute(startLocation, landmarks, driveDuration);
         } else {
             alert('No landmarks found matching your intentions.');
@@ -501,7 +531,7 @@ function calculateLongDriveRoute(start, landmarks, driveDuration) {
         if (status === 'OK') {
             directionsRenderer.setDirections(result);
 
-            // Calculate total trip time using Distance Matrix API
+            // Calculate total trip time and distance using Distance Matrix API
             const waypointLocations = [start].concat(landmarks.map(l => l.geometry.location));
             distanceMatrixService.getDistanceMatrix({
                 origins: [start],
@@ -509,7 +539,18 @@ function calculateLongDriveRoute(start, landmarks, driveDuration) {
                 travelMode: 'DRIVING',
             }, (response, status) => {
                 if (status === 'OK') {
-                    const totalDuration = response.rows[0].elements.reduce((sum, elem) => sum + elem.duration.value, 0) / 3600; // Convert to hours
+                    // Calculate total distance and duration
+                    let totalDistance = response.rows[0].elements.reduce(((sum, elem) => sum + elem.distance.value, 0) / 1000); // in km
+                    let totalDuration = response.rows[0].elements.reduce(((sum, elem) => sum + elem.duration.value, 0) / 3600); // in hours
+
+                    // Double the distance and duration
+                    totalDistance *= 2;
+                    totalDuration *= 2;
+
+                    // Display the results
+                    document.getElementById('totalDistance').textContent = totalDistance.toFixed(2); // Display with 2 decimal places
+                    document.getElementById('totalDuration').textContent = totalDuration.toFixed(2);
+                    document.getElementById('routeInfo').style.visibility = 'visible';
                 }
             });
         } else {
